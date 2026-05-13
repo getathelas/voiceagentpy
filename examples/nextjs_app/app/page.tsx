@@ -17,7 +17,7 @@ interface ToolCall {
   at: string;
 }
 
-const BACKEND = process.env.NEXT_PUBLIC_VOICE_AGENT_BACKEND ?? "http://localhost:5000";
+const BACKEND = process.env.NEXT_PUBLIC_VOICE_AGENT_BACKEND ?? "http://localhost:5050";
 
 export default function Page() {
   const [state, setState] = useState<State>("idle");
