@@ -27,6 +27,17 @@ logger = logging.getLogger(__name__)
 EventHandler = Callable[[dict[str, Any]], Union[None, Awaitable[None]]]
 FinishHandler = Callable[[dict[str, Any]], Union[None, Awaitable[None]]]
 ToolHandler = Callable[..., Union[Any, Awaitable[Any]]]
+DefaultToolHandler = Callable[[str, dict[str, Any]], Union[Any, Awaitable[Any]]]
+
+
+def mock_tool_response(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Stock `default_tool_handler` returning a generic mock payload.
+
+    Useful for prototyping a voice agent before wiring real tool logic:
+
+        agent = VoiceAgent(..., tools=[...], default_tool_handler=mock_tool_response)
+    """
+    return {"mock": True, "tool": name, "arguments": arguments}
 
 
 @dataclass
@@ -73,6 +84,7 @@ class VoiceAgent:
         voice: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_handlers: dict[str, ToolHandler] | None = None,
+        default_tool_handler: DefaultToolHandler | None = None,
         event_handler: EventHandler | None = None,
         finish_handler: FinishHandler | None = None,
         api_key: str | None = None,
@@ -87,6 +99,7 @@ class VoiceAgent:
         self.voice = voice
         self.tools = list(tools) if tools else None
         self.tool_handlers = dict(tool_handlers or {})
+        self.default_tool_handler = default_tool_handler
         self.event_handler = event_handler
         self.finish_handler = finish_handler
         self.temperature = temperature
@@ -251,16 +264,22 @@ class VoiceAgent:
         self._emit(Event(type="tool.called", session_id=session_id, data={"name": name, "arguments": args, "call_id": call_id}))
 
         handler = self.tool_handlers.get(name)
-        if handler is None:
-            err = f"No tool_handler registered for {name!r}"
-            logger.warning(err)
-            result: Any = {"error": err}
-        else:
+        if handler is not None:
             try:
                 result = _call_maybe_async_sync(handler, **args)
             except Exception as e:  # noqa: BLE001
                 logger.exception("Tool %s raised", name)
+                result: Any = {"error": str(e)}
+        elif self.default_tool_handler is not None:
+            try:
+                result = _call_maybe_async_sync(self.default_tool_handler, name, args)
+            except Exception as e:  # noqa: BLE001
+                logger.exception("default_tool_handler raised on %s", name)
                 result = {"error": str(e)}
+        else:
+            err = f"No tool_handler registered for {name!r}"
+            logger.warning(err)
+            result = {"error": err}
 
         record = {"name": name, "call_id": call_id, "arguments": args, "result": result}
         session = self.get_session(session_id)

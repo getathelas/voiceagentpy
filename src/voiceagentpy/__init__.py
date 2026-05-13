@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .agent import VoiceAgent
+from .agent import VoiceAgent, mock_tool_response
 from .client import VoiceClient, RealtimeResponse
 from .events import Event
 from .providers import (
@@ -22,6 +22,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "VoiceAgent",
+    "mock_tool_response",
     "VoiceClient",
     "RealtimeResponse",
     "Event",

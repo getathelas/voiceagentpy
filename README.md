@@ -47,6 +47,23 @@ session = agent.connect(transport="browser")
 # Hand session.to_dict() to your frontend; it dials the provider directly.
 ```
 
+### Mocking tool responses for prototyping
+
+Pass `default_tool_handler` and any tool call without a registered handler will be routed there instead of erroring. The stock `mock_tool_response` returns a generic stub so you can declare tools without writing handlers:
+
+```python
+from voiceagentpy import VoiceAgent, mock_tool_response
+
+agent = VoiceAgent(
+    model="gpt-realtime-2",
+    tools=[...],                              # tool definitions only
+    tool_handlers={},                          # no real handlers wired
+    default_tool_handler=mock_tool_response,   # auto-mocks anything
+)
+```
+
+The default handler is called with `(tool_name, arguments)` and can be sync or async. Specific entries in `tool_handlers` always win over the default.
+
 ### OpenAI-SDK-shaped client (drop-in)
 
 ```python

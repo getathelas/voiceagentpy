@@ -7,7 +7,13 @@ from typing import Any
 
 import pytest
 
-from voiceagentpy import VoiceAgent, VoiceClient, SessionCredentials, register_provider
+from voiceagentpy import (
+    VoiceAgent,
+    VoiceClient,
+    SessionCredentials,
+    mock_tool_response,
+    register_provider,
+)
 from voiceagentpy.providers.base import AgentConfig
 
 
@@ -150,6 +156,47 @@ def test_register_provider_then_resolve():
     register_provider("fake", FakeProvider)
     agent = VoiceAgent(model="fake-voice", provider="fake")
     assert agent.provider.name == "fake"
+
+
+def test_default_tool_handler_fires_when_no_specific_handler():
+    captured: list[tuple[str, dict[str, Any]]] = []
+
+    def default_handler(name: str, args: dict[str, Any]) -> dict[str, Any]:
+        captured.append((name, args))
+        return {"stub": True, "tool": name}
+
+    agent, _ = _make_agent(tool_handlers={}, default_tool_handler=default_handler)
+    result = agent.connect()
+    response = agent.ingest_event(
+        result.id,
+        {"type": "tool.call", "name": "anything_goes", "call_id": "c_99", "arguments": {"x": 1}},
+    )
+    assert response is not None
+    assert response["result"] == {"stub": True, "tool": "anything_goes"}
+    assert captured == [("anything_goes", {"x": 1})]
+
+
+def test_specific_handler_wins_over_default_tool_handler():
+    default_calls: list[str] = []
+
+    def default_handler(name: str, args: dict[str, Any]) -> dict[str, Any]:
+        default_calls.append(name)
+        return {"should_not_be_used": True}
+
+    agent, _ = _make_agent(default_tool_handler=default_handler)
+    result = agent.connect()
+    response = agent.ingest_event(
+        result.id,
+        {"type": "tool.call", "name": "lookup_user", "call_id": "c_1", "arguments": {"phone": "+1"}},
+    )
+    assert response is not None
+    assert response["result"]["ok"] is True
+    assert default_calls == []
+
+
+def test_mock_tool_response_shape():
+    out = mock_tool_response("lookup_user", {"phone": "+1"})
+    assert out == {"mock": True, "tool": "lookup_user", "arguments": {"phone": "+1"}}
 
 
 def test_per_session_on_event_overrides_agent_handler():
