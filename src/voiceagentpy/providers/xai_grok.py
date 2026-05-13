@@ -67,26 +67,13 @@ class XAIGrokProvider:
         session_id: str,
         metadata: dict[str, Any] | None = None,
     ) -> SessionCredentials:
-        session_cfg: dict[str, Any] = {"model": agent_config.model}
-        if agent_config.instructions:
-            session_cfg["instructions"] = agent_config.instructions
-        voice = self.normalize_voice(agent_config.voice)
-        if voice:
-            session_cfg["voice"] = voice
-        if agent_config.tools:
-            session_cfg["tools"] = agent_config.tools
-        if agent_config.temperature is not None:
-            session_cfg["temperature"] = agent_config.temperature
-        if agent_config.turn_detection is not None:
-            session_cfg["turn_detection"] = agent_config.turn_detection
-        if agent_config.input_audio_transcription is not None:
-            session_cfg["input_audio_transcription"] = agent_config.input_audio_transcription
-        if agent_config.extra:
-            session_cfg.update(agent_config.extra)
-
+        # Per xAI docs, the mint endpoint's `session` field only accepts `model`.
+        # The rest of the config is delivered via a `session.update` message that
+        # the client sends right after the WebSocket opens — we expose it in
+        # `extra.session_config` for the frontend.
         body: dict[str, Any] = {
             "expires_after": {"seconds": DEFAULT_TOKEN_TTL_SECONDS},
-            "session": session_cfg,
+            "session": {"model": agent_config.model},
         }
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -112,6 +99,26 @@ class XAIGrokProvider:
 
         ws_url = f"{self._realtime_ws_url}?model={agent_config.model}"
 
+        session_config: dict[str, Any] = {}
+        if agent_config.instructions:
+            session_config["instructions"] = agent_config.instructions
+        voice = self.normalize_voice(agent_config.voice)
+        if voice:
+            session_config["voice"] = voice
+        if agent_config.tools:
+            session_config["tools"] = agent_config.tools
+        if agent_config.temperature is not None:
+            session_config["temperature"] = agent_config.temperature
+        if agent_config.turn_detection is not None:
+            session_config["turn_detection"] = agent_config.turn_detection
+        # Tell xAI to encode PCM at the rate the browser is capturing at.
+        session_config["audio"] = {
+            "input": {"format": {"type": "audio/pcm", "rate": 24000}},
+            "output": {"format": {"type": "audio/pcm", "rate": 24000}},
+        }
+        if agent_config.extra:
+            session_config.update(agent_config.extra)
+
         return SessionCredentials(
             id=session_id,
             provider=self.name,
@@ -123,5 +130,6 @@ class XAIGrokProvider:
                 "transport": "websocket",
                 "auth_header": "Authorization",
                 "auth_scheme": "Bearer",
+                "session_config": session_config,
             },
         )

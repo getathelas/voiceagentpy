@@ -9,6 +9,7 @@ interface TranscriptLine {
   role: TranscriptRole;
   text: string;
   isFinal: boolean;
+  at: string;
 }
 
 interface ToolCall {
@@ -74,7 +75,7 @@ export default function Page() {
             return updated;
           }
         }
-        return [...prev, { role, text, isFinal }];
+        return [...prev, { role, text, isFinal, at: new Date().toLocaleTimeString() }];
       });
     },
     [],
@@ -184,6 +185,7 @@ export default function Page() {
             <div key={i} className={`bubble ${l.role}`}>
               <span className="role">{l.role}</span>
               <span>{l.text}</span>
+              <span className="bubble-at">· {l.at}</span>
             </div>
           ))
         )}

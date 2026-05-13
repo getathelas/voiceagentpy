@@ -247,8 +247,30 @@ async function startWebSocketTransport(
   let processor: ScriptProcessorNode | null = null;
   const playbackQueue = new PcmPlaybackQueue(audioCtx);
 
+  const sessionConfig = (session.session_config as Record<string, unknown> | undefined) ?? {};
+
   providerSocket.onopen = async () => {
     try {
+      // 1. Apply the agent config. xAI's mint endpoint only accepts {model};
+      //    everything else (instructions, voice, tools, VAD, audio format) must
+      //    be delivered via session.update or the model will sit silent.
+      providerSocket.send(
+        JSON.stringify({
+          type: "session.update",
+          session: {
+            ...sessionConfig,
+            // Default to server VAD if the backend didn't set one — without it,
+            // the model never knows when the user has finished speaking.
+            turn_detection: sessionConfig.turn_detection ?? { type: "server_vad" },
+            audio: sessionConfig.audio ?? {
+              input: { format: { type: "audio/pcm", rate: PCM_SAMPLE_RATE } },
+              output: { format: { type: "audio/pcm", rate: PCM_SAMPLE_RATE } },
+            },
+          },
+        }),
+      );
+
+      // 2. Start streaming mic audio as PCM16 base64.
       mic = await navigator.mediaDevices.getUserMedia({ audio: true });
       micSource = audioCtx.createMediaStreamSource(mic);
       processor = audioCtx.createScriptProcessor(4096, 1, 1);
@@ -263,7 +285,7 @@ async function startWebSocketTransport(
       };
       micSource.connect(processor);
       // ScriptProcessor only fires onaudioprocess while connected to a destination,
-      // even though we don't actually want to hear the mic — use a muted sink.
+      // even though we don't want to hear the mic — pipe through a muted gain.
       const muteSink = audioCtx.createGain();
       muteSink.gain.value = 0;
       processor.connect(muteSink);
@@ -290,11 +312,20 @@ async function startWebSocketTransport(
       }
       return;
     }
+    if (t === "error") {
+      onState?.("error", { stage: "provider-event", err: parsed.error ?? parsed });
+      return;
+    }
     relayProviderEventToBackend(parsed, controlSocket, onTranscript, onToolCall);
   };
 
   providerSocket.onerror = (e) => onState?.("error", { stage: "provider-ws", err: e });
-  providerSocket.onclose = () => onState?.("ended");
+  providerSocket.onclose = (e) => {
+    if (e && (e.code !== 1000 || e.reason)) {
+      onState?.("error", { stage: "provider-ws-closed", code: e.code, reason: e.reason });
+    }
+    onState?.("ended");
+  };
 
   controlSocket.onmessage = (ev) => {
     let parsed: any;
