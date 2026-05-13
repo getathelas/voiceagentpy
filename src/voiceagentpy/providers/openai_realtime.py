@@ -79,6 +79,8 @@ class OpenAIRealtimeProvider:
             body["temperature"] = agent_config.temperature
         if agent_config.turn_detection is not None:
             body["turn_detection"] = agent_config.turn_detection
+        if agent_config.input_audio_transcription is not None:
+            body["input_audio_transcription"] = agent_config.input_audio_transcription
         if agent_config.modalities:
             body["modalities"] = agent_config.modalities
         if agent_config.extra:

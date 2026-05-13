@@ -91,6 +91,7 @@ class VoiceAgent:
         provider: str | Provider | None = None,
         temperature: float | None = None,
         turn_detection: dict[str, Any] | None = None,
+        input_audio_transcription: dict[str, Any] | None = None,
         modalities: list[str] | None = None,
         **extra: Any,
     ) -> None:
@@ -104,6 +105,7 @@ class VoiceAgent:
         self.finish_handler = finish_handler
         self.temperature = temperature
         self.turn_detection = turn_detection
+        self.input_audio_transcription = input_audio_transcription
         self.modalities = modalities
         self._extra = extra
 
@@ -156,6 +158,7 @@ class VoiceAgent:
             tools=self.tools,
             temperature=self.temperature,
             turn_detection=self.turn_detection,
+            input_audio_transcription=self.input_audio_transcription,
             modalities=self.modalities,
             extra=dict(self._extra),
         )

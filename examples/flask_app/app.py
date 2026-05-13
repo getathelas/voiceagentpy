@@ -42,6 +42,7 @@ def build_agent(model: str) -> VoiceAgent:
         event_handler=lambda e: log.info("event %s", e["type"]),
         finish_handler=lambda s: log.info("finished %s (%dms)", s["session_id"], s["duration_ms"]),
         turn_detection={"type": "server_vad"},
+        input_audio_transcription={"model": "whisper-1"},  # so user speech appears in transcript
     )
 
 

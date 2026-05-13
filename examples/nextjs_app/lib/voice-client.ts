@@ -1,12 +1,12 @@
 /**
  * Browser-side voice client.
  *
- * Flow:
- *   1. POST {backend}/sessions -> { id, url, client_secret, ... }
- *   2. getUserMedia({ audio: true }) -> attach mic to RTCPeerConnection
- *   3. createOffer -> POST SDP to provider {url} with Bearer client_secret
- *   4. setRemoteDescription(answer)
- *   5. Open WebSocket to {backend}/sessions/{id}/control for tool relay & events
+ * Two transports, picked by the backend's session response:
+ *
+ *   transport === "webrtc"     → OpenAI-style: POST SDP to provider, exchange answer.
+ *   transport === "websocket"  → xAI-style: open WS, stream PCM16 base64 frames.
+ *
+ * Either way, a control WebSocket to the backend handles tool relay.
  */
 
 export type TranscriptRole = "user" | "assistant";
@@ -38,30 +38,45 @@ interface SessionPayload {
   [k: string]: unknown;
 }
 
+const PCM_SAMPLE_RATE = 24000;
+
 export async function startVoiceSession(
   opts: StartVoiceSessionOpts,
 ): Promise<VoiceSessionHandle> {
-  const { backendUrl, provider, metadata, onTranscript, onToolCall, onToolResult, onState, onEvent } = opts;
+  const { backendUrl, provider, metadata } = opts;
 
-  onState?.("connecting");
+  opts.onState?.("connecting");
 
-  // 1. Mint a session on the backend.
   const sessionResp = await fetch(`${backendUrl}/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ provider, metadata: metadata ?? {} }),
   });
   if (!sessionResp.ok) {
-    onState?.("error", { stage: "mint-session", status: sessionResp.status });
+    opts.onState?.("error", { stage: "mint-session", status: sessionResp.status });
     throw new Error(`Failed to mint session: ${sessionResp.status}`);
   }
   const session = (await sessionResp.json()) as SessionPayload;
 
-  // 2. Open control WS first so we don't miss events.
   const wsUrl = backendUrl.replace(/^http/, "ws") + `/sessions/${session.id}/control`;
   const controlSocket = new WebSocket(wsUrl);
 
-  // 3. WebRTC peer connection.
+  if (session.transport === "websocket") {
+    return startWebSocketTransport(session, controlSocket, opts, backendUrl);
+  }
+  return startWebRtcTransport(session, controlSocket, opts, backendUrl);
+}
+
+// ---------- WebRTC transport (OpenAI) ----------
+
+async function startWebRtcTransport(
+  session: SessionPayload,
+  controlSocket: WebSocket,
+  opts: StartVoiceSessionOpts,
+  backendUrl: string,
+): Promise<VoiceSessionHandle> {
+  const { onTranscript, onToolCall, onToolResult, onState, onEvent } = opts;
+
   const pc = new RTCPeerConnection();
   const remoteAudio = ensureAudioElement();
 
@@ -70,16 +85,11 @@ export async function startVoiceSession(
     void remoteAudio.play().catch(() => {});
   };
 
-  // Realtime providers expose a data channel named "oai-events" (OpenAI).
-  // We open one and listen for tool-call events; the WS control channel is
-  // for the *backend* to do tool execution, so we forward calls there.
   const dataChannel = pc.createDataChannel("oai-events");
 
-  // Track whether a model response is in flight. We cannot inject a
-  // function_call_output and trigger a new response until the response that
-  // contained the function call has fully completed (response.done) —
-  // otherwise OpenAI either drops the new response.create or the model
-  // continues its own stalling narrative ("I'm still checking...").
+  // Tool-result injection must wait for the response that contained the
+  // function call to fully end (response.done) — otherwise the model
+  // continues its filler narrative instead of speaking the tool data.
   let responseActive = false;
   const pendingToolResults: Array<{ name: string; call_id: string; result: unknown }> = [];
 
@@ -96,8 +106,6 @@ export async function startVoiceSession(
         },
       }),
     );
-    // Nudge the model: speak the result directly instead of restating
-    // "I'm checking..." filler the previous response left in history.
     sendWhenOpen(
       dataChannel,
       JSON.stringify({
@@ -116,10 +124,6 @@ export async function startVoiceSession(
       parsed = JSON.parse(msg.data);
     } catch {
       return;
-    }
-    if (typeof window !== "undefined") {
-      // Light debug — comment this out when noise gets bothersome.
-      console.debug("[voice-client] dc <-", parsed.type);
     }
     if (parsed.type === "response.created") {
       responseActive = true;
@@ -141,7 +145,6 @@ export async function startVoiceSession(
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
-  // 4. Send the SDP offer to the provider.
   const sdpResp = await fetch(session.url, {
     method: "POST",
     headers: {
@@ -157,7 +160,6 @@ export async function startVoiceSession(
   const answerSdp = await sdpResp.text();
   await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
 
-  // 5. Handle backend -> client messages (tool results to forward to provider).
   controlSocket.onmessage = (ev) => {
     let parsed: any;
     try {
@@ -166,16 +168,15 @@ export async function startVoiceSession(
       return;
     }
     if (parsed?.type === "tool.result") {
-      const result = {
+      const r = {
         name: parsed.name ?? "",
         call_id: parsed.call_id ?? "",
         result: parsed.result,
       };
       if (responseActive) {
-        // Buffer; flushed when response.done arrives.
-        pendingToolResults.push(result);
+        pendingToolResults.push(r);
       } else {
-        injectToolResult(result);
+        injectToolResult(r);
       }
     }
   };
@@ -211,6 +212,145 @@ export async function startVoiceSession(
   return { sessionId: session.id, stop };
 }
 
+// ---------- WebSocket transport (xAI Grok) ----------
+
+async function startWebSocketTransport(
+  session: SessionPayload,
+  controlSocket: WebSocket,
+  opts: StartVoiceSessionOpts,
+  backendUrl: string,
+): Promise<VoiceSessionHandle> {
+  const { onTranscript, onToolCall, onToolResult, onState, onEvent } = opts;
+
+  // xAI auth: pass token as a sec-websocket-protocol subprotocol because
+  // browsers can't set Authorization headers on a WebSocket.
+  const providerSocket = new WebSocket(session.url, [
+    `xai-client-secret.${session.client_secret}`,
+  ]);
+  providerSocket.binaryType = "arraybuffer";
+
+  const audioCtx = new AudioContext({ sampleRate: PCM_SAMPLE_RATE });
+  let mic: MediaStream | null = null;
+  let micSource: MediaStreamAudioSourceNode | null = null;
+  let processor: ScriptProcessorNode | null = null;
+  const playbackQueue = new PcmPlaybackQueue(audioCtx);
+
+  providerSocket.onopen = async () => {
+    try {
+      mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micSource = audioCtx.createMediaStreamSource(mic);
+      processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      processor.onaudioprocess = (ev) => {
+        if (providerSocket.readyState !== WebSocket.OPEN) return;
+        const input = ev.inputBuffer.getChannelData(0);
+        const pcm16 = floatToPcm16(input);
+        const b64 = arrayBufferToBase64(pcm16.buffer);
+        providerSocket.send(
+          JSON.stringify({ type: "input_audio_buffer.append", audio: b64 }),
+        );
+      };
+      micSource.connect(processor);
+      // ScriptProcessor only fires onaudioprocess while connected to a destination,
+      // even though we don't actually want to hear the mic — use a muted sink.
+      const muteSink = audioCtx.createGain();
+      muteSink.gain.value = 0;
+      processor.connect(muteSink);
+      muteSink.connect(audioCtx.destination);
+    } catch (err) {
+      onState?.("error", { stage: "mic", err: String(err) });
+    }
+  };
+
+  providerSocket.onmessage = (ev) => {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(typeof ev.data === "string" ? ev.data : "");
+    } catch {
+      return;
+    }
+    onEvent?.(parsed);
+
+    const t: string = parsed?.type ?? "";
+    if (t === "response.output_audio.delta" || t === "response.audio.delta") {
+      const audio = parsed.delta ?? parsed.audio;
+      if (typeof audio === "string") {
+        playbackQueue.enqueueBase64Pcm16(audio);
+      }
+      return;
+    }
+    relayProviderEventToBackend(parsed, controlSocket, onTranscript, onToolCall);
+  };
+
+  providerSocket.onerror = (e) => onState?.("error", { stage: "provider-ws", err: e });
+  providerSocket.onclose = () => onState?.("ended");
+
+  controlSocket.onmessage = (ev) => {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(ev.data);
+    } catch {
+      return;
+    }
+    if (parsed?.type === "tool.result") {
+      onToolResult?.(parsed.name ?? "", parsed.result, parsed.call_id ?? "");
+      const out = {
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: parsed.call_id,
+          output: JSON.stringify(parsed.result ?? {}),
+        },
+      };
+      sendWhenOpen(providerSocket, JSON.stringify(out));
+      sendWhenOpen(providerSocket, JSON.stringify({ type: "response.create" }));
+    }
+  };
+
+  controlSocket.onopen = () => onState?.("live");
+  controlSocket.onclose = () => {
+    if (providerSocket.readyState <= WebSocket.OPEN) providerSocket.close();
+    onState?.("ended");
+  };
+  controlSocket.onerror = (e) => onState?.("error", e);
+
+  const stop = async () => {
+    try {
+      processor?.disconnect();
+    } catch {}
+    try {
+      micSource?.disconnect();
+    } catch {}
+    try {
+      mic?.getTracks().forEach((t) => t.stop());
+    } catch {}
+    try {
+      playbackQueue.stop();
+    } catch {}
+    try {
+      await audioCtx.close();
+    } catch {}
+    try {
+      providerSocket.close();
+    } catch {}
+    try {
+      controlSocket.close();
+    } catch {}
+    try {
+      await fetch(`${backendUrl}/sessions/${session.id}/end`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "client_disconnect" }),
+        keepalive: true,
+      });
+    } catch {}
+    onState?.("ended");
+  };
+
+  return { sessionId: session.id, stop };
+}
+
+// ---------- Shared event relay ----------
+
 function relayProviderEventToBackend(
   evt: any,
   ws: WebSocket,
@@ -219,12 +359,13 @@ function relayProviderEventToBackend(
 ) {
   const t: string = evt?.type ?? "";
 
-  if (t === "response.audio_transcript.delta") {
+  // Assistant transcript — OpenAI uses response.audio_transcript.*, xAI uses response.output_audio_transcript.*.
+  if (t === "response.audio_transcript.delta" || t === "response.output_audio_transcript.delta") {
     onTranscript?.(evt.delta ?? "", "assistant", false);
     sendWhenOpen(ws, JSON.stringify({ type: "transcript.delta", role: "assistant", text: evt.delta }));
     return;
   }
-  if (t === "response.audio_transcript.done") {
+  if (t === "response.audio_transcript.done" || t === "response.output_audio_transcript.done") {
     onTranscript?.(evt.transcript ?? "", "assistant", true);
     sendWhenOpen(ws, JSON.stringify({ type: "transcript.final", role: "assistant", text: evt.transcript }));
     return;
@@ -279,4 +420,73 @@ function ensureAudioElement(): HTMLAudioElement {
     document.body.appendChild(el);
   }
   return el;
+}
+
+// ---------- Audio helpers ----------
+
+function floatToPcm16(input: Float32Array): Int16Array {
+  const out = new Int16Array(input.length);
+  for (let i = 0; i < input.length; i++) {
+    const s = Math.max(-1, Math.min(1, input[i]));
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  return out;
+}
+
+function arrayBufferToBase64(buf: ArrayBufferLike): string {
+  const bytes = new Uint8Array(buf as ArrayBuffer);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function base64ToInt16(b64: string): Int16Array {
+  const binary = atob(b64);
+  const len = binary.length;
+  const buf = new ArrayBuffer(len);
+  const bytes = new Uint8Array(buf);
+  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+  return new Int16Array(buf);
+}
+
+class PcmPlaybackQueue {
+  private ctx: AudioContext;
+  private nextStartTime = 0;
+  private active: AudioBufferSourceNode[] = [];
+
+  constructor(ctx: AudioContext) {
+    this.ctx = ctx;
+  }
+
+  enqueueBase64Pcm16(b64: string) {
+    const pcm = base64ToInt16(b64);
+    if (pcm.length === 0) return;
+    const float = new Float32Array(pcm.length);
+    for (let i = 0; i < pcm.length; i++) float[i] = pcm[i] / 0x8000;
+    const buffer = this.ctx.createBuffer(1, float.length, PCM_SAMPLE_RATE);
+    buffer.copyToChannel(float, 0);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(this.ctx.destination);
+    const startAt = Math.max(this.nextStartTime, this.ctx.currentTime);
+    src.start(startAt);
+    this.nextStartTime = startAt + buffer.duration;
+    this.active.push(src);
+    src.onended = () => {
+      this.active = this.active.filter((s) => s !== src);
+    };
+  }
+
+  stop() {
+    for (const src of this.active) {
+      try {
+        src.stop();
+      } catch {}
+    }
+    this.active = [];
+    this.nextStartTime = 0;
+  }
 }

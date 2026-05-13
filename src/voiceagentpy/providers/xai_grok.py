@@ -79,6 +79,8 @@ class XAIGrokProvider:
             session_cfg["temperature"] = agent_config.temperature
         if agent_config.turn_detection is not None:
             session_cfg["turn_detection"] = agent_config.turn_detection
+        if agent_config.input_audio_transcription is not None:
+            session_cfg["input_audio_transcription"] = agent_config.input_audio_transcription
         if agent_config.extra:
             session_cfg.update(agent_config.extra)
 

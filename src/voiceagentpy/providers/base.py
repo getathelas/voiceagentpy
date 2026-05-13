@@ -18,6 +18,7 @@ class AgentConfig:
     tools: list[dict[str, Any]] | None
     temperature: float | None
     turn_detection: dict[str, Any] | None
+    input_audio_transcription: dict[str, Any] | None
     modalities: list[str] | None
     extra: dict[str, Any]
 
