@@ -1,0 +1,4 @@
+# Install the voiceagentpy package from this repo with the [flask] extra:
+#   pip install -e ../..[flask]
+# Then `pip install -r requirements.txt` for example-only extras.
+python-dotenv>=1.0
