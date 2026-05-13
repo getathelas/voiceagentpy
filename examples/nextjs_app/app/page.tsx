@@ -130,7 +130,7 @@ export default function Page() {
         streams directly from your browser to the model.
       </p>
 
-      {providers.length > 1 && (
+      {providers.length > 0 && (
         <div className="provider-picker">
           {providers.map((p) => (
             <label
@@ -149,6 +149,11 @@ export default function Page() {
               <span className="provider-model">{p.model}</span>
             </label>
           ))}
+          {providers.length === 1 && (
+            <span className="provider-hint">
+              Set <code>OPENAI_API_KEY</code> and <code>XAI_API_KEY</code> in the backend to switch.
+            </span>
+          )}
         </div>
       )}
 

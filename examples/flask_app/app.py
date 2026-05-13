@@ -16,7 +16,7 @@ from flask_cors import CORS
 from flask_sock import Sock
 
 from voiceagentpy import VoiceAgent, mock_tool_response
-from tools import TOOL_DEFINITIONS
+from tools import TOOL_DEFINITIONS, TOOL_HANDLERS
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -37,7 +37,8 @@ def build_agent(model: str) -> VoiceAgent:
         ),
         voice="friendly-support",
         tools=TOOL_DEFINITIONS,
-        default_tool_handler=mock_tool_response,
+        tool_handlers=TOOL_HANDLERS,           # realistic mocks for known tools
+        default_tool_handler=mock_tool_response,  # generic fallback for anything else
         event_handler=lambda e: log.info("event %s", e["type"]),
         finish_handler=lambda s: log.info("finished %s (%dms)", s["session_id"], s["duration_ms"]),
         turn_detection={"type": "server_vad"},

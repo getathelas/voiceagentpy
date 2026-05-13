@@ -98,6 +98,20 @@ body {
   font-size: 12px;
 }
 
+.provider-hint {
+  align-self: center;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.provider-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  background: var(--bg-elev);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
 .hero {
   display: flex;
   align-items: center;
