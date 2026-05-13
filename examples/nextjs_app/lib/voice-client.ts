@@ -18,6 +18,7 @@ export interface VoiceSessionHandle {
 
 export interface StartVoiceSessionOpts {
   backendUrl: string;
+  provider?: string;
   metadata?: Record<string, unknown>;
   onTranscript?: (text: string, role: TranscriptRole, isFinal: boolean) => void;
   onToolCall?: (name: string, args: Record<string, unknown>) => void;
@@ -39,7 +40,7 @@ interface SessionPayload {
 export async function startVoiceSession(
   opts: StartVoiceSessionOpts,
 ): Promise<VoiceSessionHandle> {
-  const { backendUrl, metadata, onTranscript, onToolCall, onState, onEvent } = opts;
+  const { backendUrl, provider, metadata, onTranscript, onToolCall, onState, onEvent } = opts;
 
   onState?.("connecting");
 
@@ -47,7 +48,7 @@ export async function startVoiceSession(
   const sessionResp = await fetch(`${backendUrl}/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ metadata: metadata ?? {} }),
+    body: JSON.stringify({ provider, metadata: metadata ?? {} }),
   });
   if (!sessionResp.ok) {
     onState?.("error", { stage: "mint-session", status: sessionResp.status });

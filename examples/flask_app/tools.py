@@ -1,8 +1,8 @@
-"""Example tool definitions + handlers for the Flask example."""
+"""Example tool definitions + mock handlers for the Flask example."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -31,23 +31,24 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     },
 ]
 
+# Fixed payloads for demos — no backend or clock.
+_MOCK_USER = {"found": True, "name": "Avery Park", "plan": "pro", "tier_notes": "mock data"}
+_MOCK_NOW_ISO = "2026-05-13T18:30:00+00:00"
 
-def lookup_user(phone: str | None = None, email: str | None = None) -> dict[str, Any]:
-    # Stub implementation — return a deterministic fake record for the demo.
+
+def mock_lookup_user(phone: str | None = None, email: str | None = None) -> dict[str, Any]:
     if phone:
-        return {"found": True, "name": "Avery Park", "phone": phone, "plan": "pro"}
+        return {**_MOCK_USER, "phone": phone}
     if email:
-        return {"found": True, "name": "Avery Park", "email": email, "plan": "pro"}
+        return {**_MOCK_USER, "email": email}
     return {"found": False, "error": "phone or email required"}
 
 
-def current_time() -> dict[str, str]:
-    from datetime import datetime, timezone
-
-    return {"now": datetime.now(timezone.utc).isoformat()}
+def mock_current_time() -> dict[str, str]:
+    return {"now": _MOCK_NOW_ISO}
 
 
-TOOL_HANDLERS = {
-    "lookup_user": lookup_user,
-    "current_time": current_time,
+TOOL_HANDLERS: dict[str, Callable[..., Any]] = {
+    "lookup_user": mock_lookup_user,
+    "current_time": mock_current_time,
 }

@@ -58,6 +58,46 @@ body {
   line-height: 1.5;
 }
 
+.provider-picker {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.provider-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 14px;
+  background: var(--bg);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.provider-option:hover {
+  border-color: var(--accent);
+}
+
+.provider-option.selected {
+  border-color: var(--accent);
+  background: var(--bg-elev);
+}
+
+.provider-option input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.provider-option .provider-model {
+  color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
 .hero {
   display: flex;
   align-items: center;
