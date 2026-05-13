@@ -26,6 +26,7 @@ node_modules/
 out/
 .npm/
 .pnpm-store/
+*.tsbuildinfo
 
 # Logs
 *.log
