@@ -7,13 +7,13 @@ See [`spec.md`](./spec.md) for the full design doc.
 ## Install
 
 ```bash
-pip install "git+https://github.com/theashbhat/voiceagentpy.git#egg=voiceagentpy[flask]"
+pip install "git+https://github.com/ashbhat/voiceagentpy.git#egg=voiceagentpy[flask]"
 ```
 
 For local development:
 
 ```bash
-git clone https://github.com/theashbhat/voiceagentpy
+git clone https://github.com/ashbhat/voiceagentpy
 cd voiceagentpy
 pip install -e ".[flask,dev]"
 ```

@@ -41,8 +41,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/theashbhat/voiceagentpy"
-Repository = "https://github.com/theashbhat/voiceagentpy"
+Homepage = "https://github.com/ashbhat/voiceagentpy"
+Repository = "https://github.com/ashbhat/voiceagentpy"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/voiceagentpy"]

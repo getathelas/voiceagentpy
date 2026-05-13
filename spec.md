@@ -18,7 +18,7 @@ Twilio / telephony transport is **deferred to v2** but the `Transport` abstracti
 | # | Deliverable | Description |
 |---|---|---|
 | A | GitHub repo | Hosts the `voiceagentpy` Python package + example apps |
-| B | Pip-installable package | `pip install git+https://github.com/theashbhat/voiceagentpy.git` |
+| B | Pip-installable package | `pip install git+https://github.com/ashbhat/voiceagentpy.git` |
 | C | Example Flask backend | Mints ephemeral sessions, hosts tool handlers, emits events |
 | D | Example Next.js frontend | Single-page app: press "Say hello" → realtime voice conversation |
 
