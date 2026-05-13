@@ -29,11 +29,13 @@ export default function Page() {
   const appendTranscript = useCallback(
     (text: string, role: TranscriptRole, isFinal: boolean) => {
       setLines((prev) => {
-        if (!isFinal && prev.length > 0) {
+        if (prev.length > 0) {
           const last = prev[prev.length - 1];
           if (last.role === role && !last.isFinal) {
             const updated = [...prev];
-            updated[updated.length - 1] = { ...last, text: last.text + text };
+            updated[updated.length - 1] = isFinal
+              ? { ...last, text, isFinal: true }
+              : { ...last, text: last.text + text };
             return updated;
           }
         }
