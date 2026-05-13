@@ -74,12 +74,60 @@ export async function startVoiceSession(
   // We open one and listen for tool-call events; the WS control channel is
   // for the *backend* to do tool execution, so we forward calls there.
   const dataChannel = pc.createDataChannel("oai-events");
+
+  // Track whether a model response is in flight. We cannot inject a
+  // function_call_output and trigger a new response until the response that
+  // contained the function call has fully completed (response.done) —
+  // otherwise OpenAI either drops the new response.create or the model
+  // continues its own stalling narrative ("I'm still checking...").
+  let responseActive = false;
+  const pendingToolResults: Array<{ name: string; call_id: string; result: unknown }> = [];
+
+  const injectToolResult = (r: { name: string; call_id: string; result: unknown }) => {
+    onToolResult?.(r.name, r.result, r.call_id);
+    sendWhenOpen(
+      dataChannel,
+      JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: r.call_id,
+          output: JSON.stringify(r.result ?? {}),
+        },
+      }),
+    );
+    // Nudge the model: speak the result directly instead of restating
+    // "I'm checking..." filler the previous response left in history.
+    sendWhenOpen(
+      dataChannel,
+      JSON.stringify({
+        type: "response.create",
+        response: {
+          instructions:
+            "Use the function result above to answer the user's request directly and concisely. Speak the actual data you received. Do not say you are still checking, looking up, or waiting.",
+        },
+      }),
+    );
+  };
+
   dataChannel.onmessage = (msg) => {
     let parsed: any;
     try {
       parsed = JSON.parse(msg.data);
     } catch {
       return;
+    }
+    if (typeof window !== "undefined") {
+      // Light debug — comment this out when noise gets bothersome.
+      console.debug("[voice-client] dc <-", parsed.type);
+    }
+    if (parsed.type === "response.created") {
+      responseActive = true;
+    } else if (parsed.type === "response.done") {
+      responseActive = false;
+      while (pendingToolResults.length > 0) {
+        injectToolResult(pendingToolResults.shift()!);
+      }
     }
     onEvent?.(parsed);
     relayProviderEventToBackend(parsed, controlSocket, onTranscript, onToolCall);
@@ -118,18 +166,17 @@ export async function startVoiceSession(
       return;
     }
     if (parsed?.type === "tool.result") {
-      onToolResult?.(parsed.name ?? "", parsed.result, parsed.call_id ?? "");
-      // Send the result back to the provider through the data channel.
-      const out = {
-        type: "conversation.item.create",
-        item: {
-          type: "function_call_output",
-          call_id: parsed.call_id,
-          output: JSON.stringify(parsed.result ?? {}),
-        },
+      const result = {
+        name: parsed.name ?? "",
+        call_id: parsed.call_id ?? "",
+        result: parsed.result,
       };
-      sendWhenOpen(dataChannel, JSON.stringify(out));
-      sendWhenOpen(dataChannel, JSON.stringify({ type: "response.create" }));
+      if (responseActive) {
+        // Buffer; flushed when response.done arrives.
+        pendingToolResults.push(result);
+      } else {
+        injectToolResult(result);
+      }
     }
   };
 

@@ -1,7 +1,7 @@
 """Flask example for voiceagentpy.
 
 Builds one VoiceAgent per provider whose API key is set (OPENAI_API_KEY ->
-gpt-realtime, XAI_API_KEY -> grok-voice). The frontend picks which to use
+gpt-realtime, XAI_API_KEY -> grok-voice-latest). The frontend picks which to use
 per session via the POST /sessions body; GET /providers lists what's
 available.
 """
@@ -23,7 +23,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("voiceagentpy.example")
 
 
-PROVIDER_MODELS = {"openai": "gpt-realtime", "xai": "grok-voice"}
+PROVIDER_MODELS = {"openai": "gpt-realtime", "xai": "grok-voice-latest"}
 PROVIDER_ENV_KEYS = {"openai": "OPENAI_API_KEY", "xai": "XAI_API_KEY"}
 
 

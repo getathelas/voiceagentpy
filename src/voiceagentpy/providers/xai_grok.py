@@ -20,8 +20,9 @@ from ..session import SessionCredentials
 from .base import AgentConfig, Provider
 
 
-XAI_SESSIONS_URL = "https://api.x.ai/v1/voice/sessions"
-XAI_WEBRTC_URL = "https://api.x.ai/v1/voice/connect"
+XAI_SESSIONS_URL = "https://api.x.ai/v1/realtime/client_secrets"
+XAI_REALTIME_WS_URL = "wss://api.x.ai/v1/realtime"
+DEFAULT_TOKEN_TTL_SECONDS = 300
 
 _VOICE_MAP: dict[str, str] = {
     "friendly-support": "ara",
@@ -40,7 +41,7 @@ class XAIGrokProvider:
         api_key: str | None = None,
         *,
         base_url: str = XAI_SESSIONS_URL,
-        webrtc_url: str = XAI_WEBRTC_URL,
+        realtime_ws_url: str = XAI_REALTIME_WS_URL,
         http_client: httpx.Client | None = None,
     ) -> None:
         self.api_key = api_key or os.environ.get("XAI_API_KEY")
@@ -49,11 +50,11 @@ class XAIGrokProvider:
                 "xAI Grok provider requires an API key. Set XAI_API_KEY or pass api_key=..."
             )
         self._base_url = base_url
-        self._webrtc_url = webrtc_url
+        self._realtime_ws_url = realtime_ws_url
         self._http = http_client or httpx.Client(timeout=30.0)
 
     def supported_models(self) -> list[str]:
-        return ["grok-voice", "grok-voice-1"]
+        return ["grok-voice-latest", "grok-voice-think-fast-1.0", "grok-voice-fast-1.0"]
 
     def normalize_voice(self, voice: str | None) -> str | None:
         if voice is None:
@@ -66,21 +67,25 @@ class XAIGrokProvider:
         session_id: str,
         metadata: dict[str, Any] | None = None,
     ) -> SessionCredentials:
-        body: dict[str, Any] = {"model": agent_config.model}
+        session_cfg: dict[str, Any] = {"model": agent_config.model}
         if agent_config.instructions:
-            body["instructions"] = agent_config.instructions
+            session_cfg["instructions"] = agent_config.instructions
         voice = self.normalize_voice(agent_config.voice)
         if voice:
-            body["voice"] = voice
+            session_cfg["voice"] = voice
         if agent_config.tools:
-            body["tools"] = agent_config.tools
+            session_cfg["tools"] = agent_config.tools
         if agent_config.temperature is not None:
-            body["temperature"] = agent_config.temperature
+            session_cfg["temperature"] = agent_config.temperature
         if agent_config.turn_detection is not None:
-            body["turn_detection"] = agent_config.turn_detection
+            session_cfg["turn_detection"] = agent_config.turn_detection
         if agent_config.extra:
-            body.update(agent_config.extra)
+            session_cfg.update(agent_config.extra)
 
+        body: dict[str, Any] = {
+            "expires_after": {"seconds": DEFAULT_TOKEN_TTL_SECONDS},
+            "session": session_cfg,
+        }
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -89,35 +94,32 @@ class XAIGrokProvider:
         resp.raise_for_status()
         data = resp.json()
 
-        client_secret = (
-            data.get("client_secret")
-            or (data.get("session") or {}).get("client_secret")
-            or data.get("token")
-        )
+        client_secret = data.get("value") or data.get("client_secret") or data.get("token")
         if isinstance(client_secret, dict):
             client_secret = client_secret.get("value")
         if not client_secret:
             raise RuntimeError(
-                f"xAI did not return a client_secret. Response: {data!r}"
+                f"xAI did not return an ephemeral token. Response: {data!r}"
             )
 
         expires_at_ts = data.get("expires_at")
         if expires_at_ts:
             expires_at = datetime.fromtimestamp(int(expires_at_ts), tz=timezone.utc)
         else:
-            expires_at = datetime.now(timezone.utc) + timedelta(minutes=1)
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=DEFAULT_TOKEN_TTL_SECONDS)
+
+        ws_url = f"{self._realtime_ws_url}?model={agent_config.model}"
 
         return SessionCredentials(
             id=session_id,
             provider=self.name,
             model=agent_config.model,
-            url=data.get("url") or self._webrtc_url,
+            url=ws_url,
             client_secret=client_secret,
             expires_at=expires_at,
             extra={
-                "transport": "webrtc",
+                "transport": "websocket",
                 "auth_header": "Authorization",
                 "auth_scheme": "Bearer",
-                "xai_session_id": data.get("id"),
             },
         )
