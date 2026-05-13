@@ -17,4 +17,7 @@ class BrowserTransport:
     ) -> dict[str, Any]:
         payload = credentials.to_dict()
         payload["transport"] = "browser"
+        # Surface the wire protocol the provider chose (webrtc vs websocket) so
+        # the browser knows which connect path to take. Falls back to webrtc.
+        payload["wire_protocol"] = credentials.extra.get("transport", "webrtc")
         return payload
