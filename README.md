@@ -75,7 +75,7 @@ cp .env.example .env  # set OPENAI_API_KEY
 python app.py
 ```
 
-Backend runs on `http://localhost:5000`.
+Backend runs on `http://localhost:5050` (5000 conflicts with macOS AirPlay Receiver). Override with `PORT=...`.
 
 ### 2. Frontend (Next.js)
 

@@ -25,7 +25,7 @@ Twilio / telephony transport is **deferred to v2** but the `Transport` abstracti
 ## 3. Key Result (acceptance criteria)
 
 1. `pip install` the package from the private repo into a fresh venv.
-2. `python examples/flask_app/app.py` boots the backend on `:5000`.
+2. `python examples/flask_app/app.py` boots the backend on `:5050`.
 3. `pnpm dev` in `examples/nextjs_app` boots the frontend on `:3000`.
 4. Open `http://localhost:3000` → click **Say hello** → mic permission granted → real-time bidirectional voice conversation with the agent.
 5. The agent can invoke a registered tool (e.g. `lookup_user`) and the result is spoken back.
@@ -252,10 +252,10 @@ examples/nextjs_app/
 
 1. Page renders **Say hello** button.
 2. On click:
-   - `fetch('http://localhost:5000/sessions', { method: 'POST', body: JSON.stringify({}) })` → receives `{ client_secret, url, session_id, ... }`.
+   - `fetch('http://localhost:5050/sessions', { method: 'POST', body: JSON.stringify({}) })` → receives `{ client_secret, url, session_id, ... }`.
    - Request mic permission via `navigator.mediaDevices.getUserMedia({ audio: true })`.
    - Open `RTCPeerConnection`, add mic track, create offer, POST SDP to provider's realtime URL with `Authorization: Bearer <client_secret>`, set answer.
-   - Open WebSocket to `ws://localhost:5000/sessions/<id>/control` for tool/event relay.
+   - Open WebSocket to `ws://localhost:5050/sessions/<id>/control` for tool/event relay.
 3. Audio plays through a hidden `<audio>` element attached to the peer connection's remote stream.
 4. Live transcript renders from events received over the data channel + control WS.
 5. **End call** button (or page unload) closes the peer connection and POSTs `/sessions/<id>/end`.
