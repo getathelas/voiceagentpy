@@ -198,3 +198,10 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
 }
+
+.tool-result {
+  margin-top: 4px;
+  color: var(--success);
+  white-space: pre-wrap;
+  word-break: break-all;
+}

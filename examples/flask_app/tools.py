@@ -1,8 +1,11 @@
-"""Example tool definitions + mock handlers for the Flask example."""
+"""Tool definitions for the Flask example.
 
-from __future__ import annotations
+No handlers here — `app.py` wires `default_tool_handler=mock_tool_response`
+so every defined tool is auto-mocked. Replace with a real
+`tool_handlers={...}` dict in `app.py` when you want real implementations.
+"""
 
-from typing import Any, Callable
+from typing import Any
 
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -30,25 +33,3 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
 ]
-
-# Fixed payloads for demos — no backend or clock.
-_MOCK_USER = {"found": True, "name": "Avery Park", "plan": "pro", "tier_notes": "mock data"}
-_MOCK_NOW_ISO = "2026-05-13T18:30:00+00:00"
-
-
-def mock_lookup_user(phone: str | None = None, email: str | None = None) -> dict[str, Any]:
-    if phone:
-        return {**_MOCK_USER, "phone": phone}
-    if email:
-        return {**_MOCK_USER, "email": email}
-    return {"found": False, "error": "phone or email required"}
-
-
-def mock_current_time() -> dict[str, str]:
-    return {"now": _MOCK_NOW_ISO}
-
-
-TOOL_HANDLERS: dict[str, Callable[..., Any]] = {
-    "lookup_user": mock_lookup_user,
-    "current_time": mock_current_time,
-}

@@ -21,7 +21,8 @@ export interface StartVoiceSessionOpts {
   provider?: string;
   metadata?: Record<string, unknown>;
   onTranscript?: (text: string, role: TranscriptRole, isFinal: boolean) => void;
-  onToolCall?: (name: string, args: Record<string, unknown>) => void;
+  onToolCall?: (name: string, args: Record<string, unknown>, callId: string) => void;
+  onToolResult?: (name: string, result: unknown, callId: string) => void;
   onState?: (state: "connecting" | "live" | "ended" | "error", info?: unknown) => void;
   onEvent?: (event: unknown) => void;
 }
@@ -40,7 +41,7 @@ interface SessionPayload {
 export async function startVoiceSession(
   opts: StartVoiceSessionOpts,
 ): Promise<VoiceSessionHandle> {
-  const { backendUrl, provider, metadata, onTranscript, onToolCall, onState, onEvent } = opts;
+  const { backendUrl, provider, metadata, onTranscript, onToolCall, onToolResult, onState, onEvent } = opts;
 
   onState?.("connecting");
 
@@ -117,6 +118,7 @@ export async function startVoiceSession(
       return;
     }
     if (parsed?.type === "tool.result") {
+      onToolResult?.(parsed.name ?? "", parsed.result, parsed.call_id ?? "");
       // Send the result back to the provider through the data channel.
       const out = {
         type: "conversation.item.create",
@@ -190,7 +192,7 @@ function relayProviderEventToBackend(
     try {
       parsedArgs = evt.arguments ? JSON.parse(evt.arguments) : {};
     } catch {}
-    onToolCall?.(evt.name ?? "", parsedArgs);
+    onToolCall?.(evt.name ?? "", parsedArgs, evt.call_id ?? "");
     sendWhenOpen(
       ws,
       JSON.stringify({

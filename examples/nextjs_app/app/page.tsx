@@ -12,8 +12,10 @@ interface TranscriptLine {
 }
 
 interface ToolCall {
+  callId: string;
   name: string;
   args: Record<string, unknown>;
+  result?: unknown;
   at: string;
 }
 
@@ -94,8 +96,15 @@ export default function Page() {
           setState(s);
         },
         onTranscript: appendTranscript,
-        onToolCall: (name, args) =>
-          setToolCalls((prev) => [...prev, { name, args, at: new Date().toLocaleTimeString() }]),
+        onToolCall: (name, args, callId) =>
+          setToolCalls((prev) => [
+            ...prev,
+            { callId, name, args, at: new Date().toLocaleTimeString() },
+          ]),
+        onToolResult: (_name, result, callId) =>
+          setToolCalls((prev) =>
+            prev.map((tc) => (tc.callId === callId ? { ...tc, result } : tc)),
+          ),
       });
       sessionRef.current = handle;
     } catch (e) {
@@ -178,9 +187,14 @@ export default function Page() {
       {toolCalls.length > 0 && (
         <section className="tools">
           <div>Tool calls</div>
-          {toolCalls.map((tc, i) => (
-            <div key={i} className="tool-call">
-              <strong>{tc.name}</strong> {JSON.stringify(tc.args)} <em>· {tc.at}</em>
+          {toolCalls.map((tc) => (
+            <div key={tc.callId} className="tool-call">
+              <div>
+                <strong>{tc.name}</strong>({JSON.stringify(tc.args)}) <em>· {tc.at}</em>
+              </div>
+              {tc.result !== undefined && (
+                <div className="tool-result">→ {JSON.stringify(tc.result)}</div>
+              )}
             </div>
           ))}
         </section>
