@@ -90,22 +90,19 @@ async function startWebRtcTransport(
 
   const dataChannel = pc.createDataChannel("oai-events");
 
-  // Tool-result injection: two ordering rules from the OpenAI Realtime docs.
-  //   1. The response that contained the function_call must reach
-  //      `response.done` before we add the function_call_output — only then
-  //      is the function_call item actually committed to conversation history.
-  //   2. After we send `conversation.item.create`, we wait for the server's
-  //      `conversation.item.created` ack BEFORE sending `response.create`,
-  //      otherwise the new response can be planned against a conversation
-  //      that doesn't yet contain our tool output — and the model
-  //      hallucinates "I couldn't find that".
-  let responseActive = false;
-  const pendingToolResults: Array<{ name: string; call_id: string; result: unknown }> = [];
+  // Tool-result injection: send `conversation.item.create` immediately when
+  // we get a tool.result back from the backend. Wait for the server's
+  // `conversation.item.created` ack for that call_id, THEN send
+  // `response.create` with a pointed instructions override telling the
+  // model the tool result is now in the conversation. Previously waiting
+  // for `response.done` first caused the model to sit silent for 10+
+  // seconds because response.done seems to lag the function call.
   const awaitingItemAck = new Set<string>();
 
   const sendItemCreate = (r: { name: string; call_id: string; result: unknown }) => {
     onToolResult?.(r.name, r.result, r.call_id);
     awaitingItemAck.add(r.call_id);
+    console.debug("[voice-client] dc -> conversation.item.create", r.call_id);
     sendWhenOpen(
       dataChannel,
       JSON.stringify({
@@ -126,23 +123,27 @@ async function startWebRtcTransport(
     } catch {
       return;
     }
-    if (parsed.type === "response.created") {
-      responseActive = true;
-    } else if (parsed.type === "response.done") {
-      responseActive = false;
-      while (pendingToolResults.length > 0) {
-        sendItemCreate(pendingToolResults.shift()!);
-      }
-    } else if (parsed.type === "conversation.item.created") {
-      // Server acknowledged our function_call_output — now it's safe to
-      // ask for a new response that uses it.
+    if (typeof window !== "undefined") {
+      console.debug("[voice-client] dc <-", parsed.type);
+    }
+    if (parsed.type === "conversation.item.created") {
       const callId = parsed.item?.call_id;
       if (callId && awaitingItemAck.has(callId)) {
         awaitingItemAck.delete(callId);
-        sendWhenOpen(dataChannel, JSON.stringify({ type: "response.create" }));
+        console.debug("[voice-client] dc -> response.create (tool result acked)", callId);
+        sendWhenOpen(
+          dataChannel,
+          JSON.stringify({
+            type: "response.create",
+            response: {
+              instructions:
+                "The tool result you requested has now been added to the conversation above. Read its actual values and speak them to the user concisely. Do not say you are still working, checking, looking up, or waiting — the data is already here.",
+            },
+          }),
+        );
       }
     } else if (parsed.type === "error") {
-      // Surface provider errors so they don't fail silently.
+      console.error("[voice-client] provider error", parsed);
       onState?.("error", { stage: "provider-event", err: parsed.error ?? parsed });
     }
     onEvent?.(parsed);
@@ -180,16 +181,11 @@ async function startWebRtcTransport(
       return;
     }
     if (parsed?.type === "tool.result") {
-      const r = {
+      sendItemCreate({
         name: parsed.name ?? "",
         call_id: parsed.call_id ?? "",
         result: parsed.result,
-      };
-      if (responseActive) {
-        pendingToolResults.push(r);
-      } else {
-        sendItemCreate(r);
-      }
+      });
     }
   };
 

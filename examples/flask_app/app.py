@@ -31,9 +31,17 @@ def build_agent(model: str) -> VoiceAgent:
     return VoiceAgent(
         model=model,
         instructions=(
-            "You are a helpful support voice agent. Keep responses short. "
-            "You have tools to look up user accounts and check the time — "
-            "use them whenever the user asks something tool-relevant."
+            "You are a helpful support voice agent. Keep responses short.\n\n"
+            "You have tools to look up user accounts and check the time. "
+            "When the user asks something tool-relevant:\n"
+            "  1. Call the tool immediately. Do NOT speak filler like "
+            "'let me check', 'one moment', 'I'll look that up' — stay silent.\n"
+            "  2. When the tool result is added to the conversation, speak "
+            "the actual data from it.\n\n"
+            "Never say you are 'still working on it', 'checking', 'looking up', "
+            "or 'waiting'. If a tool result is in the conversation, its values "
+            "are authoritative — verbalize them. Never claim something wasn't "
+            "found when the result shows otherwise."
         ),
         voice="friendly-support",
         tools=TOOL_DEFINITIONS,
