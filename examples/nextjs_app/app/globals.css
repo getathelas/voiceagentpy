@@ -112,6 +112,44 @@ body {
   border-radius: 4px;
 }
 
+.mic-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.mic-picker-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.mic-picker-select {
+  flex: 1;
+  max-width: 360px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.mic-picker-select:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.mic-picker-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .hero {
   display: flex;
   align-items: center;

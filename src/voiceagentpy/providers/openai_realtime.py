@@ -35,7 +35,10 @@ from .base import AgentConfig, Provider
 
 
 REALTIME_CLIENT_SECRETS_URL = "https://api.openai.com/v1/realtime/client_secrets"
-REALTIME_WEBRTC_URL = "https://api.openai.com/v1/realtime"
+# GA WebRTC endpoint is /v1/realtime/calls (not /v1/realtime), and the
+# ?model=... query string returns 400 — the model is taken from the
+# ephemeral secret's session config we set during minting.
+REALTIME_WEBRTC_URL = "https://api.openai.com/v1/realtime/calls"
 
 # Normalized voice id -> OpenAI voice id.
 # Realtime voices: alloy, ash, ballad, coral, echo, marin, sage, shimmer, verse.
@@ -153,7 +156,7 @@ class OpenAIRealtimeProvider:
         else:
             expires_at = datetime.now(timezone.utc) + timedelta(minutes=1)
 
-        webrtc_url = f"{self._webrtc_url}?model={agent_config.model}"
+        webrtc_url = self._webrtc_url
 
         return SessionCredentials(
             id=session_id,

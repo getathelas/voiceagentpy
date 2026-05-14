@@ -50,6 +50,8 @@ function sortProviders(list: ProviderInfo[]): ProviderInfo[] {
   return [...list].sort((a, b) => rank(a.id) - rank(b.id));
 }
 
+const MIC_STORAGE_KEY = "voiceagentpy.audioInputDeviceId";
+
 export default function Page() {
   const [state, setState] = useState<State>("idle");
   const [lines, setLines] = useState<TranscriptLine[]>([]);
@@ -57,6 +59,8 @@ export default function Page() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+  const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
+  const [selectedMic, setSelectedMic] = useState<string>("");
   const sessionRef = useRef<VoiceSessionHandle | null>(null);
 
   useEffect(() => {
@@ -79,6 +83,46 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Enumerate audio inputs. Labels are empty until the user grants mic
+  // permission — once a session has started, labels appear and the dropdown
+  // re-populates. devicechange covers plug/unplug.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.enumerateDevices) {
+      return;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (cancelled) return;
+        const inputs = devices.filter((d) => d.kind === "audioinput");
+        setAudioInputs(inputs);
+        setSelectedMic((current) => {
+          if (current && inputs.some((d) => d.deviceId === current)) return current;
+          const stored = typeof window !== "undefined" ? localStorage.getItem(MIC_STORAGE_KEY) : null;
+          if (stored && inputs.some((d) => d.deviceId === stored)) return stored;
+          return ""; // empty string = browser default
+        });
+      } catch {
+        // ignore — selector just stays empty
+      }
+    };
+    refresh();
+    navigator.mediaDevices.addEventListener("devicechange", refresh);
+    return () => {
+      cancelled = true;
+      navigator.mediaDevices.removeEventListener("devicechange", refresh);
+    };
+  }, [state]); // re-run after state transitions (esp. once mic permission is granted)
+
+  const onMicChange = useCallback((deviceId: string) => {
+    setSelectedMic(deviceId);
+    if (typeof window !== "undefined") {
+      if (deviceId) localStorage.setItem(MIC_STORAGE_KEY, deviceId);
+      else localStorage.removeItem(MIC_STORAGE_KEY);
+    }
   }, []);
 
   const appendTranscript = useCallback(
@@ -109,6 +153,7 @@ export default function Page() {
       const handle = await startVoiceSession({
         backendUrl: BACKEND,
         provider: selectedProvider ?? undefined,
+        audioInputDeviceId: selectedMic || undefined,
         onState: (s, info) => {
           if (s === "error") {
             const detail =
@@ -135,7 +180,7 @@ export default function Page() {
       setErrorMsg(e instanceof Error ? e.message : String(e));
       setState("error");
     }
-  }, [appendTranscript, selectedProvider]);
+  }, [appendTranscript, selectedProvider, selectedMic]);
 
   const handleStop = useCallback(async () => {
     const h = sessionRef.current;
@@ -179,6 +224,25 @@ export default function Page() {
             </span>
           )}
         </div>
+      )}
+
+      {audioInputs.length > 0 && (
+        <label className="mic-picker">
+          <span className="mic-picker-label">Microphone</span>
+          <select
+            className="mic-picker-select"
+            value={selectedMic}
+            disabled={inSession}
+            onChange={(e) => onMicChange(e.target.value)}
+          >
+            <option value="">System default</option>
+            {audioInputs.map((d, i) => (
+              <option key={d.deviceId || i} value={d.deviceId}>
+                {d.label || `Microphone ${i + 1}`}
+              </option>
+            ))}
+          </select>
+        </label>
       )}
 
       <div className="hero">
