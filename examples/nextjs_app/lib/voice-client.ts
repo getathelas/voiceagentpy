@@ -192,6 +192,12 @@ async function startWebRtcTransport(
   controlSocket.onopen = () => onState?.("live");
   controlSocket.onclose = () => onState?.("ended");
   controlSocket.onerror = (e) => onState?.("error", e);
+  // The socket may have already finished opening during the async SDP
+  // exchange above — in that case onopen won't fire again, so transition
+  // to live ourselves.
+  if (controlSocket.readyState === WebSocket.OPEN) {
+    onState?.("live");
+  }
 
   const stop = async () => {
     try {
@@ -351,6 +357,9 @@ async function startWebSocketTransport(
     onState?.("ended");
   };
   controlSocket.onerror = (e) => onState?.("error", e);
+  if (controlSocket.readyState === WebSocket.OPEN) {
+    onState?.("live");
+  }
 
   const stop = async () => {
     try {

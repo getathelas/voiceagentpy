@@ -168,9 +168,19 @@ export default function Page() {
             End call
           </button>
         )}
-        <span className={`status ${state === "live" ? "live" : state === "error" ? "error" : ""}`}>
+        <span
+          className={`status ${
+            state === "live"
+              ? "live"
+              : state === "error"
+              ? "error"
+              : state === "connecting"
+              ? "connecting"
+              : ""
+          }`}
+        >
           {state === "idle" && "Ready"}
-          {state === "connecting" && "Connecting…"}
+          {state === "connecting" && "Connecting"}
           {state === "live" && "Live"}
           {state === "ended" && "Ended"}
           {state === "error" && (errorMsg ?? "Error")}

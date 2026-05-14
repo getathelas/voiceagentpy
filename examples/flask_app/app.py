@@ -23,7 +23,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("voiceagentpy.example")
 
 
-PROVIDER_MODELS = {"openai": "gpt-realtime", "xai": "grok-voice-latest"}
+PROVIDER_MODELS = {"openai": "gpt-realtime-2", "xai": "grok-voice-latest"}
 PROVIDER_ENV_KEYS = {"openai": "OPENAI_API_KEY", "xai": "XAI_API_KEY"}
 
 

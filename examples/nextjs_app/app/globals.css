@@ -162,6 +162,21 @@ body {
   color: var(--danger);
 }
 
+.status.connecting::after {
+  content: "";
+  display: inline-block;
+  width: 0.6em;
+  text-align: left;
+  animation: voice-dots 1.2s steps(4, end) infinite;
+}
+
+@keyframes voice-dots {
+  0% { content: ""; }
+  25% { content: "."; }
+  50% { content: ".."; }
+  75% { content: "..."; }
+}
+
 .transcript {
   background: var(--bg-elev);
   border: 1px solid var(--border);
