@@ -92,7 +92,11 @@ class OpenAIRealtimeProvider:
             "OpenAI-Beta": "realtime=v1",
         }
         resp = self._http.post(self._base_url, json=body, headers=headers)
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            # Surface OpenAI's error body — bare httpx error messages lose it.
+            raise RuntimeError(
+                f"OpenAI Realtime session mint failed ({resp.status_code}): {resp.text}"
+            )
         data = resp.json()
 
         client_secret_obj = data.get("client_secret") or {}

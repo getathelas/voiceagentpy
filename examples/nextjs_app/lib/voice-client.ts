@@ -54,8 +54,15 @@ export async function startVoiceSession(
     body: JSON.stringify({ provider, metadata: metadata ?? {} }),
   });
   if (!sessionResp.ok) {
-    opts.onState?.("error", { stage: "mint-session", status: sessionResp.status });
-    throw new Error(`Failed to mint session: ${sessionResp.status}`);
+    let detail = "";
+    try {
+      const j = await sessionResp.json();
+      detail = j?.error ? String(j.error) : JSON.stringify(j);
+    } catch {
+      detail = await sessionResp.text().catch(() => "");
+    }
+    opts.onState?.("error", { stage: "mint-session", status: sessionResp.status, detail });
+    throw new Error(`Failed to mint session (${sessionResp.status}): ${detail}`);
   }
   const session = (await sessionResp.json()) as SessionPayload;
 
@@ -247,7 +254,16 @@ async function startWebSocketTransport(
   let mic: MediaStream | null = null;
   let micSource: MediaStreamAudioSourceNode | null = null;
   let processor: ScriptProcessorNode | null = null;
-  const playbackQueue = new PcmPlaybackQueue(audioCtx);
+
+  // Route assistant audio through a MediaStreamDestination + <audio> element so
+  // the browser's acoustic echo canceller has a reference signal to subtract
+  // from the mic input. Without this, the assistant hears itself via the mic
+  // and the conversation runs away — the model keeps responding to its own voice.
+  const playbackDest = audioCtx.createMediaStreamDestination();
+  const playbackEl = ensureAudioElement();
+  playbackEl.srcObject = playbackDest.stream;
+  void playbackEl.play().catch(() => {});
+  const playbackQueue = new PcmPlaybackQueue(audioCtx, playbackDest);
 
   const sessionConfig = (session.session_config as Record<string, unknown> | undefined) ?? {};
 
@@ -256,14 +272,21 @@ async function startWebSocketTransport(
       // 1. Apply the agent config. xAI's mint endpoint only accepts {model};
       //    everything else (instructions, voice, tools, VAD, audio format) must
       //    be delivered via session.update or the model will sit silent.
+      const turnDetection = (sessionConfig.turn_detection as Record<string, unknown>) ?? {
+        type: "server_vad",
+      };
       providerSocket.send(
         JSON.stringify({
           type: "session.update",
           session: {
             ...sessionConfig,
-            // Default to server VAD if the backend didn't set one — without it,
-            // the model never knows when the user has finished speaking.
-            turn_detection: sessionConfig.turn_detection ?? { type: "server_vad" },
+            turn_detection: {
+              ...turnDetection,
+              // Ask the server to cancel any in-flight response when the user
+              // starts speaking, instead of the model finishing its turn over us.
+              interrupt_response: turnDetection.interrupt_response ?? true,
+              create_response: turnDetection.create_response ?? true,
+            },
             audio: sessionConfig.audio ?? {
               input: { format: { type: "audio/pcm", rate: PCM_SAMPLE_RATE } },
               output: { format: { type: "audio/pcm", rate: PCM_SAMPLE_RATE } },
@@ -272,8 +295,16 @@ async function startWebSocketTransport(
         }),
       );
 
-      // 2. Start streaming mic audio as PCM16 base64.
-      mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // 2. Start streaming mic audio as PCM16 base64. Explicitly enable
+      //    echoCancellation so the browser subtracts the assistant audio we're
+      //    playing back through the <audio> element above.
+      mic = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       micSource = audioCtx.createMediaStreamSource(mic);
       processor = audioCtx.createScriptProcessor(4096, 1, 1);
       processor.onaudioprocess = (ev) => {
@@ -313,6 +344,12 @@ async function startWebSocketTransport(
         playbackQueue.enqueueBase64Pcm16(audio);
       }
       return;
+    }
+    if (t === "input_audio_buffer.speech_started") {
+      // User started talking — drop any queued assistant audio so we don't
+      // keep speaking over them. Server VAD with interrupt_response also
+      // cancels the in-flight response on the server side.
+      playbackQueue.stop();
     }
     if (t === "error") {
       onState?.("error", { stage: "provider-event", err: parsed.error ?? parsed });
@@ -502,11 +539,13 @@ function base64ToInt16(b64: string): Int16Array {
 
 class PcmPlaybackQueue {
   private ctx: AudioContext;
+  private destination: AudioNode;
   private nextStartTime = 0;
   private active: AudioBufferSourceNode[] = [];
 
-  constructor(ctx: AudioContext) {
+  constructor(ctx: AudioContext, destination: AudioNode) {
     this.ctx = ctx;
+    this.destination = destination;
   }
 
   enqueueBase64Pcm16(b64: string) {
@@ -518,7 +557,7 @@ class PcmPlaybackQueue {
     buffer.copyToChannel(float, 0);
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
-    src.connect(this.ctx.destination);
+    src.connect(this.destination);
     const startAt = Math.max(this.nextStartTime, this.ctx.currentTime);
     src.start(startAt);
     this.nextStartTime = startAt + buffer.duration;

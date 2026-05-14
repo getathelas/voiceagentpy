@@ -80,7 +80,10 @@ class XAIGrokProvider:
             "Content-Type": "application/json",
         }
         resp = self._http.post(self._base_url, json=body, headers=headers)
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            raise RuntimeError(
+                f"xAI realtime session mint failed ({resp.status_code}): {resp.text}"
+            )
         data = resp.json()
 
         client_secret = data.get("value") or data.get("client_secret") or data.get("token")

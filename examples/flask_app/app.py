@@ -23,7 +23,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("voiceagentpy.example")
 
 
-PROVIDER_MODELS = {"openai": "gpt-realtime-2", "xai": "grok-voice-latest"}
+PROVIDER_MODELS = {"openai": "gpt-realtime", "xai": "grok-voice-latest"}
 PROVIDER_ENV_KEYS = {"openai": "OPENAI_API_KEY", "xai": "XAI_API_KEY"}
 
 
@@ -81,7 +81,13 @@ def create_session():
     provider = body.get("provider") or next(iter(agents))
     if provider not in agents:
         return jsonify({"error": f"provider '{provider}' not configured"}), 400
-    result = agents[provider].connect(transport="browser", metadata=body.get("metadata") or {})
+    try:
+        result = agents[provider].connect(transport="browser", metadata=body.get("metadata") or {})
+    except Exception as e:
+        # Surface upstream provider errors as JSON so the browser shows
+        # the real cause instead of a CORS-shaped 500.
+        log.exception("mint failed for provider=%s", provider)
+        return jsonify({"error": str(e), "provider": provider}), 502
     sessions[result.id] = agents[provider]
     return result.to_dict()
 

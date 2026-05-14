@@ -92,7 +92,11 @@ export default function Page() {
         provider: selectedProvider ?? undefined,
         onState: (s, info) => {
           if (s === "error") {
-            setErrorMsg(typeof info === "string" ? info : JSON.stringify(info));
+            const detail =
+              info && typeof info === "object" && "detail" in info
+                ? String((info as { detail: unknown }).detail)
+                : null;
+            setErrorMsg(detail || (typeof info === "string" ? info : JSON.stringify(info)));
           }
           setState(s);
         },
