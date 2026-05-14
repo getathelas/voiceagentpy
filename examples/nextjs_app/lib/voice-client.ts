@@ -19,12 +19,23 @@ export interface VoiceSessionHandle {
 export interface StartVoiceSessionOpts {
   backendUrl: string;
   provider?: string;
+  audioInputDeviceId?: string;
   metadata?: Record<string, unknown>;
   onTranscript?: (text: string, role: TranscriptRole, isFinal: boolean) => void;
   onToolCall?: (name: string, args: Record<string, unknown>, callId: string) => void;
   onToolResult?: (name: string, result: unknown, callId: string) => void;
   onState?: (state: "connecting" | "live" | "ended" | "error", info?: unknown) => void;
   onEvent?: (event: unknown) => void;
+}
+
+function micConstraints(deviceId?: string): MediaTrackConstraints {
+  const base: MediaTrackConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  };
+  if (deviceId) base.deviceId = { exact: deviceId };
+  return base;
 }
 
 interface SessionPayload {
@@ -157,7 +168,9 @@ async function startWebRtcTransport(
     relayProviderEventToBackend(parsed, controlSocket, onTranscript, onToolCall);
   };
 
-  const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const mic = await navigator.mediaDevices.getUserMedia({
+    audio: micConstraints(opts.audioInputDeviceId),
+  });
   for (const track of mic.getAudioTracks()) {
     pc.addTrack(track, mic);
   }
@@ -248,11 +261,7 @@ async function startWebSocketTransport(
   // often the slowest step (1–2s), so kicking it off before we wait on the
   // socket cuts the perceived "Connecting…" time noticeably.
   const micPromise = navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    },
+    audio: micConstraints(opts.audioInputDeviceId),
   });
 
   // xAI auth: pass token as a sec-websocket-protocol subprotocol because
