@@ -177,6 +177,38 @@ body {
   75% { content: "..."; }
 }
 
+.attached-tools {
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.attached-tools-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.attached-tools-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.attached-tool code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: var(--bg-elev);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--text);
+}
+
 .transcript {
   background: var(--bg-elev);
   border: 1px solid var(--border);

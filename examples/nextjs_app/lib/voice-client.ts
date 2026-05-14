@@ -243,6 +243,18 @@ async function startWebSocketTransport(
 ): Promise<VoiceSessionHandle> {
   const { onTranscript, onToolCall, onToolResult, onState, onEvent } = opts;
 
+  // Start the mic permission prompt + device init immediately, in parallel
+  // with the WebSocket handshake. On a cold start the getUserMedia call is
+  // often the slowest step (1–2s), so kicking it off before we wait on the
+  // socket cuts the perceived "Connecting…" time noticeably.
+  const micPromise = navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+  });
+
   // xAI auth: pass token as a sec-websocket-protocol subprotocol because
   // browsers can't set Authorization headers on a WebSocket.
   const providerSocket = new WebSocket(session.url, [
@@ -295,16 +307,9 @@ async function startWebSocketTransport(
         }),
       );
 
-      // 2. Start streaming mic audio as PCM16 base64. Explicitly enable
-      //    echoCancellation so the browser subtracts the assistant audio we're
-      //    playing back through the <audio> element above.
-      mic = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      // 2. Wait for the mic that we started acquiring at function-entry, then
+      //    wire up the capture graph and start streaming PCM16 frames.
+      mic = await micPromise;
       micSource = audioCtx.createMediaStreamSource(mic);
       processor = audioCtx.createScriptProcessor(4096, 1, 1);
       processor.onaudioprocess = (ev) => {
@@ -323,6 +328,12 @@ async function startWebSocketTransport(
       muteSink.gain.value = 0;
       processor.connect(muteSink);
       muteSink.connect(audioCtx.destination);
+
+      // Now we're actually ready to listen. The control socket may have
+      // opened ages ago — but the user can't talk until the provider WS is
+      // up, session.update has been applied, and the mic is capturing.
+      // Defer the "live" signal until all three are true.
+      onState?.("live");
     } catch (err) {
       onState?.("error", { stage: "mic", err: String(err) });
     }
@@ -388,15 +399,15 @@ async function startWebSocketTransport(
     }
   };
 
-  controlSocket.onopen = () => onState?.("live");
+  // NOTE: "live" is fired from providerSocket.onopen *after* mic setup, not
+  // from the control socket. The control socket to our backend opens quickly
+  // (localhost), but the user can't actually talk yet until xAI's WS is up
+  // and the mic is capturing. Firing "live" here would lie to the UI.
   controlSocket.onclose = () => {
     if (providerSocket.readyState <= WebSocket.OPEN) providerSocket.close();
     onState?.("ended");
   };
   controlSocket.onerror = (e) => onState?.("error", e);
-  if (controlSocket.readyState === WebSocket.OPEN) {
-    onState?.("live");
-  }
 
   const stop = async () => {
     try {

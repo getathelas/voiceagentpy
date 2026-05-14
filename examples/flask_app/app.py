@@ -9,6 +9,7 @@ available.
 import json
 import logging
 import os
+from typing import Any
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
@@ -23,7 +24,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("voiceagentpy.example")
 
 
-PROVIDER_MODELS = {"openai": "gpt-realtime", "xai": "grok-voice-latest"}
+PROVIDER_MODELS = {"openai": "gpt-realtime-2", "xai": "grok-voice-latest"}
 PROVIDER_ENV_KEYS = {"openai": "OPENAI_API_KEY", "xai": "XAI_API_KEY"}
 
 
@@ -70,9 +71,28 @@ CORS(app, origins=os.environ.get("VOICE_AGENT_ALLOWED_ORIGINS", "http://localhos
 sock = Sock(app)
 
 
+def _tool_summary(tools: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    for t in tools or []:
+        fn = t.get("function") if isinstance(t, dict) else None
+        if not fn:
+            continue
+        out.append({"name": fn.get("name", ""), "description": fn.get("description", "")})
+    return out
+
+
 @app.get("/providers")
 def providers():
-    return {"providers": [{"id": p, "model": PROVIDER_MODELS[p]} for p in agents]}
+    return {
+        "providers": [
+            {
+                "id": p,
+                "model": PROVIDER_MODELS[p],
+                "tools": _tool_summary(agents[p].tools),
+            }
+            for p in agents
+        ]
+    }
 
 
 @app.post("/sessions")

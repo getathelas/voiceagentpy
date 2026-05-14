@@ -20,9 +20,15 @@ interface ToolCall {
   at: string;
 }
 
+interface ToolInfo {
+  name: string;
+  description?: string;
+}
+
 interface ProviderInfo {
   id: string;
   model: string;
+  tools?: ToolInfo[];
 }
 
 const BACKEND = process.env.NEXT_PUBLIC_VOICE_AGENT_BACKEND ?? "http://localhost:5050";
@@ -31,6 +37,18 @@ const PROVIDER_LABELS: Record<string, string> = {
   openai: "OpenAI",
   xai: "xAI Grok",
 };
+
+// Preferred picker order. The first id present in the backend response is
+// selected by default.
+const PROVIDER_ORDER = ["xai", "openai"];
+
+function sortProviders(list: ProviderInfo[]): ProviderInfo[] {
+  const rank = (id: string) => {
+    const i = PROVIDER_ORDER.indexOf(id);
+    return i === -1 ? PROVIDER_ORDER.length : i;
+  };
+  return [...list].sort((a, b) => rank(a.id) - rank(b.id));
+}
 
 export default function Page() {
   const [state, setState] = useState<State>("idle");
@@ -49,9 +67,10 @@ export default function Page() {
         if (!r.ok) return;
         const data = (await r.json()) as { providers: ProviderInfo[] };
         if (cancelled) return;
-        setProviders(data.providers);
-        if (data.providers.length > 0) {
-          setSelectedProvider(data.providers[0].id);
+        const ordered = sortProviders(data.providers);
+        setProviders(ordered);
+        if (ordered.length > 0) {
+          setSelectedProvider(ordered[0].id);
         }
       } catch {
         // Backend not reachable yet — picker stays empty; first connect attempt will surface the error.
@@ -190,6 +209,24 @@ export default function Page() {
           {state === "error" && (errorMsg ?? "Error")}
         </span>
       </div>
+
+      {(() => {
+        const tools =
+          providers.find((p) => p.id === selectedProvider)?.tools ?? [];
+        return tools.length > 0 ? (
+          <section className="attached-tools" aria-label="Available tools">
+            <div className="attached-tools-label">Tools available to the agent</div>
+            <ul className="attached-tools-list">
+              {tools.map((t) => (
+                <li key={t.name} className="attached-tool">
+                  <code>{t.name}</code>
+                  {t.description ? <span> — {t.description}</span> : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null;
+      })()}
 
       <section className="transcript">
         {lines.length === 0 ? (
