@@ -271,7 +271,21 @@ async function startWebSocketTransport(
   ]);
   providerSocket.binaryType = "arraybuffer";
 
-  const audioCtx = new AudioContext({ sampleRate: PCM_SAMPLE_RATE });
+  // Don't force a hardware sample rate. Requesting 24 kHz makes the
+  // constructor throw "The AudioContext encountered an error from the audio
+  // device or the WebAudio renderer" on devices/drivers that can't run
+  // natively at 24 kHz (many Bluetooth headsets, some Windows audio drivers).
+  // Run at the device's native rate and resample to/from the provider's
+  // 24 kHz PCM in JS: mic input is downsampled before send (below), and
+  // playback AudioBuffers declared at 24 kHz are auto-resampled to the
+  // context rate by the AudioBufferSourceNode.
+  const audioCtx = new AudioContext();
+  audioCtx.addEventListener?.("error", () =>
+    onState?.("error", {
+      stage: "audio-context",
+      err: "AudioContext device/renderer error",
+    }),
+  );
   let mic: MediaStream | null = null;
   let micSource: MediaStreamAudioSourceNode | null = null;
   let processor: ScriptProcessorNode | null = null;
@@ -324,7 +338,8 @@ async function startWebSocketTransport(
       processor.onaudioprocess = (ev) => {
         if (providerSocket.readyState !== WebSocket.OPEN) return;
         const input = ev.inputBuffer.getChannelData(0);
-        const pcm16 = floatToPcm16(input);
+        const resampled = resampleLinear(input, audioCtx.sampleRate, PCM_SAMPLE_RATE);
+        const pcm16 = floatToPcm16(resampled);
         const b64 = arrayBufferToBase64(pcm16.buffer);
         providerSocket.send(
           JSON.stringify({ type: "input_audio_buffer.append", audio: b64 }),
@@ -528,6 +543,29 @@ function ensureAudioElement(): HTMLAudioElement {
 }
 
 // ---------- Audio helpers ----------
+
+// Linear-interpolation resampler. Used to convert mic capture (at the
+// AudioContext's native rate, e.g. 44.1/48 kHz) down to the provider's
+// 24 kHz PCM. Linear interp without a pre-filter aliases slightly on
+// downsample, but it's inaudible/irrelevant for speech VAD + ASR and keeps
+// the hot path allocation-light.
+function resampleLinear(
+  input: Float32Array,
+  inRate: number,
+  outRate: number,
+): Float32Array {
+  if (inRate === outRate) return input;
+  const ratio = inRate / outRate;
+  const outLen = Math.max(1, Math.round(input.length / ratio));
+  const out = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const pos = i * ratio;
+    const i0 = Math.floor(pos);
+    const i1 = Math.min(i0 + 1, input.length - 1);
+    out[i] = input[i0] + (input[i1] - input[i0]) * (pos - i0);
+  }
+  return out;
+}
 
 function floatToPcm16(input: Float32Array): Int16Array {
   const out = new Int16Array(input.length);
