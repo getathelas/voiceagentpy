@@ -68,17 +68,45 @@ cd voiceagentpy
 pip install -e ".[fastapi,dev]"
 ```
 
-## Quickstart — outbound Twilio call
-
-Set the environment (see [Configuration](#configuration)):
+Twilio has to reach your app back, so a localhost demo needs a public URL. The
+Quickstart uses a free [`cloudflared`](https://github.com/cloudflare/cloudflared)
+quick tunnel — no Cloudflare account, no config. Install it once:
 
 ```bash
-export XAI_API_KEY=xai-...
-export TWILIO_ACCOUNT_SID=AC...
-export TWILIO_AUTH_TOKEN=...
-export TWILIO_FROM_NUMBER=+1...
-export PUBLIC_BASE_URL=https://your-tunnel.example.com   # must reach the app below
+brew install cloudflared        # macOS; see cloudflared docs for other OSes
 ```
+
+(Only needed for the tunnel path. Skip it if you're deploying behind your own
+`https://` URL — see [Configuration](#configuration).)
+
+## Quickstart — outbound Twilio call
+
+[`example/`](example/) is one self-contained script: it builds the agent,
+launches a `cloudflared` tunnel so Twilio can reach back (no public URL to
+provision), places the call, waits for it to finish, prints the summary, and
+exits. With `cloudflared` installed (above):
+
+```bash
+cd example
+python3 -m venv ../.venv && source ../.venv/bin/activate
+pip install -r requirements.txt        # voiceagentpy[fastapi] + python-dotenv
+cp ../.env.example ../.env             # fill in XAI_API_KEY + the TWILIO_* vars
+python3 main.py +14085987929           # or set CALL_TO in .env
+```
+
+Your phone rings; answer and talk to Grok. You do **not** set
+`PUBLIC_BASE_URL` — the script launches the tunnel and wires it in. Set it only
+to use your own `https://` URL instead (see [Configuration](#configuration)).
+
+See [`example/README.md`](example/README.md) for the full walkthrough,
+including the inbound webhook (`POST /twilio/voice`) and a carrier note about
+outbound call blocking.
+
+### What the API looks like
+
+`main.py` is just the snippet below — a `VoiceAgent`, the FastAPI app it
+serves, and `agent.call(...)`. This is the code you'd write in your own app,
+behind your own `PUBLIC_BASE_URL` instead of the demo tunnel:
 
 ```python
 import threading, uvicorn
@@ -122,26 +150,8 @@ res = agent.call(transport="twilio", call_details={"to": "+1..."})
 print("dialing", res.call_sid, "session", res.id)
 ```
 
-`PUBLIC_BASE_URL` has to be an `https://` URL that Twilio can reach back on —
-your deployment, an ngrok/cloudflared tunnel, etc.
-
-### Runnable example (tunnel included)
-
-[`example/`](example/) is a single, self-contained script that does all of the
-above **and** launches a `cloudflared` tunnel for you (no public URL needed),
-places the call, waits for it to finish, prints the summary, and exits:
-
-```bash
-cd example
-python3 -m venv ../.venv && source ../.venv/bin/activate
-pip install -r requirements.txt        # voiceagentpy[fastapi] + python-dotenv
-cp ../.env.example ../.env             # fill in keys
-python3 main.py +14085987929           # or set CALL_TO in .env
-```
-
-See [`example/README.md`](example/README.md) for the full walkthrough,
-including the inbound webhook (`POST /twilio/voice`) and a carrier note about
-outbound call blocking.
+For your own deployment, set `PUBLIC_BASE_URL` yourself (deployment, ngrok,
+etc.) — it must be an `https://` URL Twilio can reach back on.
 
 ## Tool calls
 
