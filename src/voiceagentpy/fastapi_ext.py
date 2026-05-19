@@ -116,6 +116,12 @@ def build_fastapi_app(
                 "call_sid": form.get("CallSid"),
                 "public_base_url": base,
             },
+            metadata={
+                "from": form.get("From"),
+                "to": form.get("To"),
+                "call_sid": form.get("CallSid"),
+                "direction": "inbound",
+            },
         )
         twiml = res.to_dict().get("twiml")
         if not twiml:

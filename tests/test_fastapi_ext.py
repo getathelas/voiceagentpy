@@ -72,6 +72,15 @@ def test_inbound_returns_connect_stream_twiml_and_creates_session():
     assert "wss://h.ngrok.app/twilio/media/" in r.text
     # a session was created and tracked
     assert len(agent._sessions) == 1
+    # the caller is attributed on the session so finish summaries are useful
+    sess = next(iter(agent._sessions.values()))
+    assert sess.metadata == {
+        "from": "+1444",
+        "to": "+1555",
+        "call_sid": "CA1",
+        "direction": "inbound",
+    }
+    assert sess.summary()["metadata"]["from"] == "+1444"
 
 
 def test_outbound_twiml_callback():

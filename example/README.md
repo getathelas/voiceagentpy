@@ -1,12 +1,13 @@
 # Telephony example (Twilio + xAI Grok)
 
-One script: creates the agent, places an outbound call, stays running until
-the call completes, exits. Audio flows **caller ↔ Twilio (μ-law 8 kHz) ↔ this
-process (transcode) ↔ xAI realtime (PCM16 24 kHz)**.
+Two one-command scripts: **`main.py`** places an *outbound* call and exits
+when it completes; **`inbound.py`** receives calls on a Twilio number and
+serves until Ctrl-C ([see below](#inbound)). Both share the same setup. Audio
+flows **caller ↔ Twilio (μ-law 8 kHz) ↔ this process (transcode) ↔ xAI
+realtime (PCM16 24 kHz)**.
 
-`main.py` runs a small FastAPI server in a background thread because Twilio
-must reach back in for the TwiML callback + media WebSocket — but you just run
-one command.
+Each script runs a small FastAPI server (Twilio must reach back in for the
+TwiML callback + media WebSocket) — but you just run one command.
 
 ## Setup
 
@@ -77,10 +78,37 @@ account — it will call a tool). Hang up and the script logs the summary
 > production, register the number for SHAKEN/STIR + branded caller ID via
 > Twilio Trust Hub / Voice Integrity.
 
-## Inbound / production split
+## Inbound
 
-`main.py` is outbound-only for simplicity. The library also serves inbound
-(point a Twilio number's voice webhook at `POST /twilio/voice`) and a
-production telephony-microservice split — see
-`voiceagentpy.fastapi_ext.build_fastapi_app` and
-`voiceagentpy.telephony.control_plane.HttpControlPlane`.
+`inbound.py` is the receive-calls counterpart of `main.py` — one command, no
+manual Twilio Console steps. Add the number to receive on to the repo-root
+`.env`:
+
+```ini
+TWILIO_INCOMING_NUMBER=+15139515830  # a voice number you own on this account
+```
+
+Then, from the `example/` folder with the venv active:
+
+```bash
+python3 inbound.py                   # then call TWILIO_INCOMING_NUMBER
+```
+
+It starts the tunnel + server, then **points that number's Voice webhook at
+`https://<tunnel>/twilio/voice`** via the Twilio REST API (saving the previous
+value). Call the number and talk to Grok exactly as with the outbound demo;
+each call's transcript and end-of-call summary (caller, duration, turns, tool
+calls) are logged live. It serves until **Ctrl-C**, then restores the number's
+previous Voice webhook and shuts the tunnel down — so it never leaves your
+real number pointed at a dead tunnel.
+
+Inbound webhooks are signature-checked automatically whenever
+`TWILIO_AUTH_TOKEN` is set (a forged `POST /twilio/voice` gets a 403).
+
+> **Production:** don't auto-rewire an ephemeral tunnel. Set a stable
+> `PUBLIC_BASE_URL` (a named cloudflared tunnel or your deployment) and
+> configure the number's Voice webhook to `https://your-domain/twilio/voice`
+> once in the Twilio Console. The same `build_fastapi_app(agent)` also supports
+> a telephony-microservice split — see
+> `voiceagentpy.fastapi_ext.build_fastapi_app` and
+> `voiceagentpy.telephony.control_plane.HttpControlPlane`.
