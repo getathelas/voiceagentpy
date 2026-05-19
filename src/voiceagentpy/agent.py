@@ -67,6 +67,31 @@ class _ConnectResult:
         return d
 
 
+@dataclass
+class _CallResult:
+    """Returned from VoiceAgent.call — an outbound telephony call was placed."""
+
+    id: str  # session id
+    provider: str
+    model: str
+    call_sid: str  # Twilio Call SID
+    status: str  # Twilio call status (queued/initiated/...)
+    transport: str = "twilio"
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        d = {
+            "id": self.id,
+            "provider": self.provider,
+            "model": self.model,
+            "call_sid": self.call_sid,
+            "status": self.status,
+            "transport": self.transport,
+        }
+        d.update(self.extra)
+        return d
+
+
 class VoiceAgent:
     """High-level voice agent.
 
@@ -140,6 +165,20 @@ class VoiceAgent:
 
     # ----- session lifecycle ---------------------------------------------------
 
+    def _build_agent_config(self) -> AgentConfig:
+        """Provider-agnostic config snapshot. Shared by connect() and call()."""
+        return AgentConfig(
+            model=self.model,
+            instructions=self.instructions,
+            voice=self.voice,
+            tools=self.tools,
+            temperature=self.temperature,
+            turn_detection=self.turn_detection,
+            input_audio_transcription=self.input_audio_transcription,
+            modalities=self.modalities,
+            extra=dict(self._extra),
+        )
+
     def connect(
         self,
         *,
@@ -151,21 +190,32 @@ class VoiceAgent:
         onFinish: FinishHandler | None = None,
     ) -> _ConnectResult:
         sid = session_id or _new_session_id()
-        cfg = AgentConfig(
-            model=self.model,
-            instructions=self.instructions,
-            voice=self.voice,
-            tools=self.tools,
-            temperature=self.temperature,
-            turn_detection=self.turn_detection,
-            input_audio_transcription=self.input_audio_transcription,
-            modalities=self.modalities,
-            extra=dict(self._extra),
-        )
-        creds = self.provider.mint_session(cfg, sid, metadata=metadata)
+        cfg = self._build_agent_config()
+        if transport == "twilio":
+            # Telephony audio flows through the media bridge, which opens its
+            # own server-side provider connection — there's no browser to hand
+            # an ephemeral key to, so skip the mint (and its network call).
+            from .session import SessionCredentials, _now
+
+            creds = SessionCredentials(
+                id=sid,
+                provider=self.provider.name,
+                model=self.model,
+                url="",
+                client_secret="",
+                expires_at=_now(),
+            )
+            started_data = {
+                "model": self.model,
+                "transport": "twilio",
+                "direction": "inbound",
+            }
+        else:
+            creds = self.provider.mint_session(cfg, sid, metadata=metadata)
+            started_data = {"model": self.model}
         session = Session(
             id=sid,
-            credentials=creds,
+            credentials=None if transport == "twilio" else creds,
             metadata=dict(metadata or {}),
             event_handler=onEvent,
             finish_handler=onFinish,
@@ -173,7 +223,7 @@ class VoiceAgent:
         with self._lock:
             self._sessions[sid] = session
 
-        self._emit(Event(type="session.started", session_id=sid, data={"model": self.model}))
+        self._emit(Event(type="session.started", session_id=sid, data=started_data))
 
         t = build_transport(transport)
         payload = t.prepare(creds, call_details)
@@ -188,6 +238,83 @@ class VoiceAgent:
             extra={k: v for k, v in payload.items() if k not in {
                 "id", "provider", "model", "url", "client_secret", "expires_at", "transport"
             }},
+        )
+
+    def call(
+        self,
+        *,
+        transport: str = "twilio",
+        call_details: dict[str, Any] | None = None,
+        session_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        onEvent: EventHandler | None = None,
+        onFinish: FinishHandler | None = None,
+    ) -> _CallResult:
+        """Place an **outbound** telephony call that connects the callee to
+        this agent.
+
+        `call_details` must include `to` (E.164). Twilio config resolves from
+        the environment (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+        `TWILIO_FROM_NUMBER`, `PUBLIC_BASE_URL`) and may be overridden per call
+        (`from`, `account_sid`, `auth_token`, `public_base_url`).
+
+        No ephemeral key is minted — telephony audio flows through the media
+        bridge, which opens its own server-side provider connection. We just
+        create/track the session and tell Twilio to dial; Twilio then fetches
+        `/twilio/voice/{session_id}` for the <Connect><Stream> TwiML.
+        """
+        if transport != "twilio":
+            raise ValueError(
+                f"call() is telephony-only; transport={transport!r} not supported."
+            )
+        from .telephony.twilio_rest import place_call, resolve_twilio_config
+
+        cd = dict(call_details or {})
+        to = cd.get("to")
+        if not to:
+            raise ValueError("call_details must include 'to' (E.164 number).")
+
+        sid = session_id or cd.get("session_id") or _new_session_id()
+        session = Session(
+            id=sid,
+            credentials=None,
+            metadata=dict(metadata or {}),
+            event_handler=onEvent,
+            finish_handler=onFinish,
+        )
+        with self._lock:
+            self._sessions[sid] = session
+        self._emit(
+            Event(
+                type="session.started",
+                session_id=sid,
+                data={"model": self.model, "transport": "twilio", "direction": "outbound"},
+            )
+        )
+
+        tcfg = resolve_twilio_config(cd)
+        voice_url = f"{tcfg.public_base_url}/twilio/voice/{sid}"
+        try:
+            result = place_call(
+                config=tcfg,
+                to=to,
+                voice_url=voice_url,
+                status_callback=cd.get("status_callback"),
+                http=cd.get("_http"),
+            )
+        except Exception as e:
+            # Dialing failed — don't leak a half-open session.
+            self.end_session(sid, reason="dial_failed")
+            raise RuntimeError(f"Outbound dial failed: {e}") from e
+
+        return _CallResult(
+            id=sid,
+            provider=self.provider.name,
+            model=self.model,
+            call_sid=result.get("sid", ""),
+            status=result.get("status", ""),
+            transport="twilio",
+            extra={"to": to, "from": tcfg.from_number, "voice_url": voice_url},
         )
 
     def end_session(self, session_id: str, reason: str = "client_disconnect") -> None:

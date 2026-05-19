@@ -30,8 +30,15 @@ flask = [
     "flask-sock>=0.7",
     "flask-cors>=4.0",
 ]
+fastapi = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "websockets>=12",
+    "python-multipart>=0.0.9",
+]
 examples = [
     "voiceagentpy[flask]",
+    "voiceagentpy[fastapi]",
     "python-dotenv>=1.0",
 ]
 dev = [

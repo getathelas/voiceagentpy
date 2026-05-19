@@ -129,10 +129,43 @@ Flask backend (voiceagentpy + tool_handlers)  │
    └──── mints ephemeral key per /sessions ───┘
 ```
 
-Audio never touches the Python process. The control WebSocket exists only so the backend can execute tools the model requests and surface session events to your `event_handler` / `finish_handler`.
+For the **browser** transport, audio never touches the Python process — the
+control WebSocket exists only so the backend can execute tools and surface
+events to your `event_handler` / `finish_handler`.
+
+## Telephony (Twilio)
+
+```
+Caller ──PSTN──► Twilio ──μ-law 8k WS──► FastAPI bridge ──PCM16 24k WS──► xAI Grok
+                                            │ transcode + tool relay
+                                            ▼
+                                  VoiceAgent (tool_handlers, transcript, events)
+```
+
+Phone calls connect through a server-side **Media Streams bridge** — here audio
+*does* flow through Python (transcoded μ-law 8 kHz ↔ PCM16 24 kHz), a
+deliberate, telephony-only departure from the browser model.
+
+```python
+# Outbound — Twilio dials out, callee talks to the agent
+agent.call(transport="twilio", call_details={"to": "+1..."})
+
+# Inbound — point a Twilio number's voice webhook at POST /twilio/voice
+agent.connect(transport="twilio", call_details={...})
+```
+
+Twilio config resolves from the environment (`TWILIO_ACCOUNT_SID`,
+`TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, `PUBLIC_BASE_URL`). The bridge runs
+on FastAPI (`voiceagentpy.fastapi_ext.build_fastapi_app`); the prototype
+monolith and a production telephony microservice share one `ControlPlane` seam
+(`InProcess` vs `Http`), so the split is a wiring change. See
+[`examples/fastapi_app`](examples/fastapi_app). xAI Grok is the supported
+telephony provider.
 
 ## Roadmap
 
-- **v2**: Twilio / SIP transport (the `Transport` abstraction reserves the seam)
+- **shipped**: Twilio telephony transport (outbound `agent.call` + inbound webhook, FastAPI media bridge)
+- **next**: OpenAI Realtime parity for the telephony bridge
+- **next**: SHAKEN/STIR + branded caller-ID guidance for production outbound
 - **v2**: provider-direct tool webhooks to skip the browser round-trip
 - **v2**: normalized voice catalog across providers

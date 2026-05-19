@@ -1,7 +1,0 @@
-# Self-contained: installs voiceagentpy in editable mode with [flask] extras
-# (pulls in flask, flask-sock, flask-cors) plus python-dotenv for .env loading.
-#
-# From this directory:
-#   pip install -r requirements.txt
--e ../..[flask]
-python-dotenv>=1.0

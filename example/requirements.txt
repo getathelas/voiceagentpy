@@ -1,0 +1,8 @@
+# Self-contained: installs voiceagentpy in editable mode with [fastapi]
+# extras (fastapi, uvicorn, websockets, python-multipart) plus python-dotenv.
+# httpx (used here to poll Twilio) rides in as a core voiceagentpy dependency.
+#
+# From this directory:
+#   pip install -r requirements.txt
+-e ../..[fastapi]
+python-dotenv>=1.0

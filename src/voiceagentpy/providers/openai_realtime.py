@@ -31,7 +31,7 @@ from typing import Any
 import httpx
 
 from ..session import SessionCredentials
-from .base import AgentConfig, Provider
+from .base import AgentConfig
 
 
 REALTIME_CLIENT_SECRETS_URL = "https://api.openai.com/v1/realtime/client_secrets"
